@@ -6,7 +6,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        "color-picker": resolve(__dirname, "color-picker.html"),
       },
     },
   },
