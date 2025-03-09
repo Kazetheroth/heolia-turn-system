@@ -1,12 +1,12 @@
 {
   "name": "Heolia Turn System",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "manifest_version": 1,
   "action": {
     "title": "Heolia Turn System",
     "icon": "/icon.svg",
     "popover": "/",
-    "height": 600,
-    "width": 400
+    "height": 630,
+    "width": 430
   }
 }

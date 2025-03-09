@@ -49,21 +49,15 @@ function setupEventHandlers() {
   OBR.scene.items.onChange((items) => {
     const sceneIds = new Set(items.map(item => item.id));
     // Check if any items in turn order were deleted from the scene
-    if (turnOrder.some(entry => !sceneIds.has(entry.id))) {
-      // Filter out deleted items
-      turnOrder = turnOrder.filter(entry => sceneIds.has(entry.id));
+    if (turnOrder.some(entry => !sceneIds.has(entry.id) && entry.id !== undefined)) {
+      // Filter out deleted items (but keep invocations that don't have an ID)
+      turnOrder = turnOrder.filter(entry => entry.id === undefined || sceneIds.has(entry.id));
       // Save updated turn order
       saveTurnOrder();
       // Update the UI
       updateUI();
     }
   });
-  
-  // Set up button click handlers
-  document.getElementById("add-selected").addEventListener("click", addSelectedItems);
-  document.getElementById("next-turn").addEventListener("click", nextTurn);
-  document.getElementById("previous-turn").addEventListener("click", previousTurn);
-  document.getElementById("reset-turns").addEventListener("click", resetTurns);
   
   // Set up initiative adjustment handlers
   document.getElementById("turn-list").addEventListener("click", (event) => {
@@ -78,12 +72,24 @@ function setupEventHandlers() {
       removeFromTurnOrder(index);
     }
   });
+  // Set up button click handlers
+  document.getElementById("add-selected").addEventListener("click", addSelectedItems);
+  document.getElementById("next-turn").addEventListener("click", nextTurn);
+  document.getElementById("previous-turn").addEventListener("click", previousTurn);
+  document.getElementById("reset-turns").addEventListener("click", resetTurns);
+}
+
+// Add selected items to turn order
+async function addSelectedItems() {
+  const selectedItems = await OBR.player.getSelection();
+  addItemsToTurnOrder(selectedItems);
 }
 
 // Set up context menu for adding characters to turn order
 function setupContextMenu() {
+  // Create the "Add to Turn Order" context menu item
   OBR.contextMenu.create({
-    id: `${ID}/context-menu`,
+    id: `${ID}/add-to-turn-order`,
     icons: [
       {
         icon: "/turn.svg",
@@ -97,16 +103,31 @@ function setupContextMenu() {
       }
     ],
     onClick: (context) => {
-      // Add all selected items to turn order
+      // Add all selected items to turn order normally
       addItemsToTurnOrder(context.items);
     }
   });
-}
-
-// Add selected items to turn order
-async function addSelectedItems() {
-  const selectedItems = await OBR.player.getSelection();
-  addItemsToTurnOrder(selectedItems);
+  
+  // Create the "Add as Invocation" context menu item as a separate menu
+  OBR.contextMenu.create({
+    id: `${ID}/add-as-invocation`,
+    icons: [
+      {
+        icon: "/turn.svg",
+        label: "Add as Invocation",
+        filter: {
+          every: [
+            { key: "layer", value: "CHARACTER" },
+            { key: "type", value: "IMAGE" }
+          ]
+        }
+      }
+    ],
+    onClick: (context) => {
+      // Add as invocation after current character
+      addAsInvocation(context.items);
+    }
+  });
 }
 
 // Add items to turn order
@@ -119,7 +140,8 @@ function addItemsToTurnOrder(items) {
       id: item.id,
       name: item.text?.plainText || item.name || "Unknown",
       initiative: rollD100(), // Roll a d100 for initiative
-      image: item.image?.url
+      image: item.image?.url,
+      isInvocation: false
     }));
   
   if (newItems.length > 0) {
@@ -133,14 +155,75 @@ function addItemsToTurnOrder(items) {
   }
 }
 
-// Move an entry up in initiative order
+// Add selected items as invocations after the current character
+function addAsInvocation(items) {
+  // Only proceed if there's an active turn
+  if (currentTurnIndex < 0 || currentTurnIndex >= turnOrder.length) {
+    OBR.notification.show("Cannot add invocation: No active character turn", "ERROR");
+    return;
+  }
+  
+  // Get the initiative value of the current character
+  const currentInitiative = turnOrder[currentTurnIndex].initiative;
+  
+  // Filter items to only include characters not already in turn order
+  const newInvocations = items
+    .filter(item => item.layer === "CHARACTER")
+    .filter(item => !turnOrder.some(entry => entry.id === item.id))
+    .map(item => ({
+      id: item.id,
+      name: item.text?.plainText || item.name || "Unknown",
+      initiative: currentInitiative, // Same as current character's initiative
+      image: item.image?.url,
+      isInvocation: true // Mark as an invocation
+    }));
+  
+  if (newInvocations.length === 0) {
+    return;
+  }
+  
+  // Find the index where to insert the invocations
+  let insertIndex = currentTurnIndex + 1;
+  
+  // Insert the invocations after any characters with the same initiative as the current character
+  while (
+    insertIndex < turnOrder.length && 
+    turnOrder[insertIndex].initiative === currentInitiative
+  ) {
+    insertIndex++;
+  }
+  
+  // Insert the invocations at the calculated index
+  turnOrder.splice(insertIndex, 0, ...newInvocations);
+  
+  // If we inserted before the current turn index, update it
+  if (insertIndex <= currentTurnIndex) {
+    currentTurnIndex += newInvocations.length;
+    saveCurrentTurnIndex();
+  }
+  
+  // Save the updated turn order
+  saveTurnOrder();
+  
+  // Update the UI
+  updateUI();
+  
+  // Show success notification
+  if (newInvocations.length === 1) {
+    OBR.notification.show(`Added ${newInvocations[0].name} as invocation`, "SUCCESS");
+  } else {
+    OBR.notification.show(`Added ${newInvocations.length} invocations`, "SUCCESS");
+  }
+}
+
+// Move an entry up in initiative order (lower number)
 function moveUp(index) {
   if (index > 0) {
     // Store current initiative values
     const currentInitiative = turnOrder[index].initiative;
     const prevInitiative = turnOrder[index - 1].initiative;
     
-    // Swap initiative values
+    // Lower the initiative value (better)
     turnOrder[index].initiative = prevInitiative - 1;
     
     // Sort by initiative ascending (lower numbers first)
@@ -150,14 +233,14 @@ function moveUp(index) {
   }
 }
 
-// Move an entry down in initiative order
+// Move an entry down in initiative order (higher number)
 function moveDown(index) {
   if (index < turnOrder.length - 1) {
     // Store current initiative values
     const currentInitiative = turnOrder[index].initiative;
     const nextInitiative = turnOrder[index + 1].initiative;
     
-    // Swap initiative values
+    // Increase the initiative value (worse)
     turnOrder[index].initiative = nextInitiative + 1;
     
     // Sort by initiative ascending (lower numbers first)
@@ -169,14 +252,31 @@ function moveDown(index) {
 
 // Remove an entry from the turn order
 function removeFromTurnOrder(index) {
+  // Adjust currentTurnIndex if removing an entry before it
+  if (index < currentTurnIndex) {
+    currentTurnIndex--;
+  } 
+  // Or if removing the current entry
+  else if (index === currentTurnIndex) {
+    // If it's the last entry, go to the previous one
+    if (currentTurnIndex === turnOrder.length - 1) {
+      currentTurnIndex--;
+    }
+    // Otherwise, stay on the same index (which will be the next entry)
+  }
+  
+  // Remove the entry
   turnOrder.splice(index, 1);
   
-  // Update currentTurnIndex if needed
-  if (currentTurnIndex >= turnOrder.length) {
+  // Ensure currentTurnIndex is valid
+  if (turnOrder.length === 0) {
+    currentTurnIndex = -1;
+  } else if (currentTurnIndex >= turnOrder.length) {
     currentTurnIndex = turnOrder.length - 1;
   }
   
   saveTurnOrder();
+  saveCurrentTurnIndex();
   updateUI();
 }
 
@@ -224,13 +324,15 @@ async function highlightCurrentToken() {
   // Add highlight to current token
   if (currentTurnIndex >= 0 && currentTurnIndex < turnOrder.length) {
     const currentItem = turnOrder[currentTurnIndex];
-    await OBR.scene.items.updateItems([{
-      id: currentItem.id,
-      border: {
-        width: 5,
-        color: "#FF9900"
-      }
-    }]);
+    if (currentItem.id) {
+      await OBR.scene.items.updateItems([{
+        id: currentItem.id,
+        border: {
+          width: 5,
+          color: "#FF9900"
+        }
+      }]);
+    }
   }
 }
 
@@ -270,6 +372,9 @@ function updateUI() {
     listItem.className = "turn-item";
     if (index === currentTurnIndex) {
       listItem.classList.add("current-turn");
+    }
+    if (entry.isInvocation) {
+      listItem.classList.add("invocation");
     }
     
     // Add character image if available
