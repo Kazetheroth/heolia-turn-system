@@ -3,7 +3,8 @@ import OBR from "@owlbear-rodeo/sdk";
 const ID = "com.heolia.turn-system";
 let turnOrder = [];
 let currentTurnIndex = -1;
-let metadata = null;
+let metadata = {};
+let lastUpdateTimestamp = Date.now(); // Track when we last updated the data
 
 // Generate a random d100 roll (1-100)
 function rollD100() {
@@ -31,18 +32,41 @@ OBR.onReady(async () => {
 // Set up event handlers
 function setupEventHandlers() {
   // Listen for metadata changes
-  OBR.room.onMetadataChange((metadata) => {
-    // Update local turnOrder from metadata
-    if (metadata[`${ID}/turnOrder`]) {
-      turnOrder = metadata[`${ID}/turnOrder`];
+  OBR.room.onMetadataChange((newMetadata) => {
+    console.log("onMetadataChange triggered");
+    
+    // Check if the metadata update is newer than our last local update
+    const serverUpdateTimestamp = newMetadata[`${ID}/lastUpdate`] || 0;
+    
+    if (serverUpdateTimestamp > lastUpdateTimestamp) {
+      console.log(`Accepting server update (timestamp: ${serverUpdateTimestamp} > local: ${lastUpdateTimestamp})`);
+      
+      // Update local turnOrder from metadata
+      if (newMetadata[`${ID}/turnOrder`]) {
+        const newTurnOrder = newMetadata[`${ID}/turnOrder`];
+        console.log(`onMetadataChange: New turnOrder from metadata, length: ${newTurnOrder.length}`);
+        
+        // Check if it's different than our current turnOrder
+        const currentLength = turnOrder.length;
+        turnOrder = newTurnOrder;
+        console.log(`onMetadataChange: Updated local turnOrder, old length: ${currentLength}, new length: ${turnOrder.length}`);
+      }
+      
+      if (newMetadata[`${ID}/currentTurnIndex`] !== undefined) {
+        currentTurnIndex = newMetadata[`${ID}/currentTurnIndex`];
+      }
+      
+      // Update our lastUpdateTimestamp to match the server
+      lastUpdateTimestamp = serverUpdateTimestamp;
+      
+      // Update the UI to reflect changes
+      updateUI();
+    } else {
+      console.log(`Ignoring server update (timestamp: ${serverUpdateTimestamp} <= local: ${lastUpdateTimestamp})`);
     }
     
-    if (metadata[`${ID}/currentTurnIndex`] !== undefined) {
-      currentTurnIndex = metadata[`${ID}/currentTurnIndex`];
-    }
-    
-    // Update the UI to reflect changes
-    updateUI();
+    // Store the metadata for future reference
+    metadata = newMetadata;
   });
   
   // Listen for item deletion to remove from turn order
@@ -69,6 +93,8 @@ function setupEventHandlers() {
       moveDown(index);
     } else if (event.target.classList.contains("remove-item")) {
       const index = parseInt(event.target.dataset.index);
+      console.log(`Attempting to remove item at index ${index}`);
+      console.log(`Character name: ${turnOrder[index]?.name}`);
       removeFromTurnOrder(index);
     }
   });
@@ -252,6 +278,9 @@ function moveDown(index) {
 
 // Remove an entry from the turn order
 function removeFromTurnOrder(index) {
+  console.log(`removeFromTurnOrder: Before removal - turnOrder length: ${turnOrder.length}`);
+  console.log(`removeFromTurnOrder: Removing item at index ${index}: ${turnOrder[index]?.name}`);
+  
   // Adjust currentTurnIndex if removing an entry before it
   if (index < currentTurnIndex) {
     currentTurnIndex--;
@@ -267,6 +296,7 @@ function removeFromTurnOrder(index) {
   
   // Remove the entry
   turnOrder.splice(index, 1);
+  console.log(`removeFromTurnOrder: After removal - turnOrder length: ${turnOrder.length}`);
   
   // Ensure currentTurnIndex is valid
   if (turnOrder.length === 0) {
@@ -338,15 +368,20 @@ async function highlightCurrentToken() {
 
 // Save the turn order to room metadata
 function saveTurnOrder() {
+  console.log(`saveTurnOrder: Saving turnOrder with length: ${turnOrder.length}`);
+  lastUpdateTimestamp = Date.now();
   OBR.room.setMetadata({
-    [`${ID}/turnOrder`]: turnOrder
+    [`${ID}/turnOrder`]: turnOrder,
+    [`${ID}/lastUpdate`]: lastUpdateTimestamp
   });
 }
 
 // Save the current turn index to room metadata
 function saveCurrentTurnIndex() {
+  lastUpdateTimestamp = Date.now();
   OBR.room.setMetadata({
-    [`${ID}/currentTurnIndex`]: currentTurnIndex
+    [`${ID}/currentTurnIndex`]: currentTurnIndex,
+    [`${ID}/lastUpdate`]: lastUpdateTimestamp
   });
 }
 
@@ -368,6 +403,7 @@ function updateUI() {
   
   // Create list items for each entry in turn order
   turnOrder.forEach((entry, index) => {
+    console.log(`Creating button for ${entry.name} at index ${index}`);
     const listItem = document.createElement("li");
     listItem.className = "turn-item";
     if (index === currentTurnIndex) {
