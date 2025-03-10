@@ -11,6 +11,7 @@ A turn tracking extension for Owlbear Rodeo that helps game masters manage comba
 - **Character Management**: Add tokens via selection or right-click context menu
 - **Initiative Adjustment**: Fine-tune initiative order with intuitive controls
 - **Persistent State**: Turn order and current turn state are saved and synced across all players
+- **Invocation System**: Handle turn for pets and summoned creatures
 
 ## Installation
 
