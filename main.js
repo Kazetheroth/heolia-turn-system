@@ -107,7 +107,22 @@ function setupEventHandlers() {
 
 // Add selected items to turn order
 async function addSelectedItems() {
-  const selectedItems = await OBR.player.getSelection();
+  console.log("Adding selected items to turn order");
+  const selectedIds = await OBR.player.getSelection();
+  console.log("Selected IDs:", selectedIds);
+  
+  if (selectedIds.length === 0) {
+    OBR.notification.show("No items selected", "WARNING");
+    return;
+  }
+  
+  // Get all scene items
+  const allItems = await OBR.scene.items.getItems();
+  
+  // Filter to only include selected items
+  const selectedItems = allItems.filter(item => selectedIds.includes(item.id));
+  console.log("Selected complete items:", selectedItems);
+  
   addItemsToTurnOrder(selectedItems);
 }
 
